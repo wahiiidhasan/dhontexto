@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Contexto Multiplayer</title>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,sans-serif;background:#0f0f0f;color:#f0f0f0;min-height:100vh}
+.container{max-width:600px;margin:0 auto;padding:1.5rem}
+.screen{display:none}.screen.active{display:block}
+h1{font-size:24px;font-weight:600;margin-bottom:4px}
+h1 span{color:#4ade80}
+.sub{font-size:14px;color:#888;margin-bottom:1.5rem}
+.card{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:1.25rem;margin-bottom:1rem}
+.label{font-size:11px;color:#666;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px}
+input[type=text]{width:100%;padding:10px 14px;background:#111;border:1px solid #333;border-radius:8px;color:#f0f0f0;font-size:15px;font-family:inherit;outline:none;transition:border 0.15s}
+input[type=text]:focus{border-color:#4ade80}
+input::placeholder{color:#444}
+input:disabled{opacity:0.5;cursor:not-allowed}
+.row{display:flex;gap:8px;margin-bottom:10px;align-items:center}
+.row input{flex:1}
+.btn{padding:10px 18px;border-radius:8px;border:1px solid #333;background:#1a1a1a;color:#f0f0f0;font-size:14px;cursor:pointer;font-family:inherit;transition:all 0.15s;white-space:nowrap}
+.btn:hover{background:#2a2a2a}
+.btn:active{transform:scale(0.97)}
+.btn:disabled{opacity:0.4;cursor:not-allowed}
+.btn-green{background:#16a34a;border-color:#16a34a;color:#fff}
+.btn-green:hover{background:#15803d}
+.btn-hint{background:#1e3a5f;border-color:#1e40af;color:#60a5fa;font-size:13px;padding:8px 14px}
+.btn-hint:hover{background:#1e40af}
+.link-box{background:#111;border:1px solid #2a2a2a;border-radius:8px;padding:10px 14px;font-size:13px;color:#888;word-break:break-all;margin:8px 0}
+.players-row{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+.chip{display:flex;align-items:center;gap:6px;padding:5px 12px;border-radius:20px;background:#1e1e1e;border:1px solid #2a2a2a;font-size:13px}
+.avatar{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0}
+.tabs{display:flex;gap:0;border-bottom:1px solid #2a2a2a;margin-bottom:1rem}
+.tab{padding:9px 16px;font-size:14px;color:#666;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;background:none;border-top:none;border-left:none;border-right:none;font-family:inherit}
+.tab.active{color:#4ade80;border-bottom-color:#4ade80}
+.tab-panel{display:none}.tab-panel.active{display:block}
+.guess-row{display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid #1e1e1e;animation:fadeIn 0.2s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.guess-row:last-child{border:none}
+.rank{min-width:56px;text-align:center;padding:4px 8px;border-radius:6px;font-size:13px;font-weight:600}
+.rank-gold{background:#854d0e;color:#fef9c3}
+.rank-green{background:#14532d;color:#86efac}
+.rank-amber{background:#78350f;color:#fde68a}
+.rank-red{background:#450a0a;color:#fca5a5}
+.rank-hint{background:#1e3a5f;color:#93c5fd;font-style:italic}
+.word{flex:1;font-size:15px;font-weight:500}
+.word.hint-word{color:#60a5fa;font-style:italic}
+.nick-tag{font-size:11px;padding:2px 8px;border-radius:20px;border:1px solid #333;font-weight:500}
+.winner-box{background:#052e16;border:1px solid #166534;border-radius:12px;padding:1.5rem;text-align:center;margin-bottom:1rem}
+.winner-box h2{color:#4ade80;font-size:22px;margin-bottom:4px}
+.winner-box p{color:#86efac;font-size:14px}
+.lb-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #1e1e1e}
+.lb-row:last-child{border:none}
+.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:#14532d;color:#86efac}
+.badge-hint{background:#1e3a5f;color:#93c5fd}
+.status{font-size:13px;color:#666;margin-top:6px;min-height:20px;display:flex;align-items:center;gap:6px}
+.spinner{width:14px;height:14px;border:2px solid #333;border-top-color:#4ade80;border-radius:50%;animation:spin 0.6s linear infinite;display:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.pulse{animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+.top-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem}
+.room-code-badge{font-size:13px;font-family:monospace;color:#888;background:#1a1a1a;padding:4px 10px;border-radius:6px;border:1px solid #2a2a2a}
+.avatars-row{display:flex}
+.avatars-row .avatar{border:2px solid #0f0f0f;margin-left:-6px}
+.avatars-row .avatar:first-child{margin-left:0}
+.scroll-box{max-height:360px;overflow-y:auto}
+.scroll-box::-webkit-scrollbar{width:4px}
+.scroll-box::-webkit-scrollbar-track{background:#111}
+.scroll-box::-webkit-scrollbar-thumb{background:#333;border-radius:2px}
+.empty{text-align:center;color:#444;font-size:14px;padding:2rem 0}
+.hint-bar{display:flex;align-items:center;gap:10px;background:#0f172a;border:1px solid #1e3a5f;border-radius:8px;padding:10px 14px;margin-bottom:10px}
+.hint-count{font-size:12px;color:#60a5fa;flex:1}
+.config-box{background:#111;border:1px dashed #333;border-radius:8px;padding:1rem;margin-bottom:1rem;font-size:13px;color:#666;line-height:1.7}
+.config-box code{background:#1a1a1a;color:#4ade80;padding:2px 6px;border-radius:4px;font-family:monospace;font-size:12px}
+.error{color:#f87171;font-size:13px;margin-top:6px}
+</style>
+</head>
+<body>
+<div class="container">
+
+<!-- FIREBASE CONFIG SCREEN -->
+<div id="screen-config" class="screen active">
+  <h1>Contexto <span>Multiplayer</span></h1>
+  <p class="sub">Paste your Firebase config to get started.</p>
+
+  <div class="card">
+    <div class="label">Firebase config (JSON only)</div>
+    <div class="config-box" style="margin-bottom:10px">
+      Get from: <strong style="color:#f0f0f0">Firebase Console → Project Settings → Your apps → SDK setup</strong><br>
+      Paste only the <code>{...}</code> object with quoted keys.
+    </div>
+    <textarea id="fb-config" rows="7" style="width:100%;background:#111;border:1px solid #333;border-radius:8px;color:#4ade80;font-family:monospace;font-size:12px;padding:10px;outline:none;resize:vertical;line-height:1.6" placeholder='{
+  "apiKey": "AIza...",
+  "authDomain": "your-app.firebaseapp.com",
+  "databaseURL": "https://your-app-default-rtdb.firebaseio.com",
+  "projectId": "your-app",
+  "storageBucket": "your-app.appspot.com",
+  "messagingSenderId": "123456789",
+  "appId": "1:123:web:abc123"
+}'></textarea>
+  </div>
+
+  <p class="error" id="config-error"></p>
+  <button class="btn btn-green" onclick="initFirebase()">Connect & Play →</button>
+  <p style="font-size:12px;color:#444;margin-top:10px">AI ranking and hints powered by Gemini. Firebase config is only stored in this session.</p>
+</div>
+
+<!-- JOIN SCREEN -->
+<div id="screen-join" class="screen">
+  <h1>Contexto <span>Multiplayer</span></h1>
+  <p class="sub">Guess the secret word. Compete with friends in real time.</p>
+  <div class="card">
+    <div class="label">Your nickname</div>
+    <input type="text" id="nick-input" placeholder="e.g. Zero" maxlength="16" style="margin-bottom:14px">
+    <div class="label">Room code (leave blank to create a new room)</div>
+    <div class="row">
+      <input type="text" id="room-input" placeholder="e.g. ABC12" maxlength="8" style="text-transform:uppercase">
+      <button class="btn btn-green" onclick="handleJoin()">→ Go</button>
+    </div>
+    <p class="error" id="join-error"></p>
+  </div>
+</div>
+
+<!-- LOBBY SCREEN -->
+<div id="screen-lobby" class="screen">
+  <h1>Room <span id="lobby-code" style="font-family:monospace"></span></h1>
+  <p class="sub">Share this link with friends:</p>
+  <div class="link-box" id="lobby-link"></div>
+  <div style="display:flex;gap:8px;margin-bottom:1.5rem">
+    <button class="btn" onclick="copyLink()">📋 Copy link</button>
+  </div>
+  <div class="card">
+    <div class="label">Players in room <span class="pulse" style="color:#4ade80">●</span></div>
+    <div class="players-row" id="lobby-players"></div>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center">
+    <button class="btn btn-green" id="start-btn" onclick="startGame()">▶ Start game</button>
+    <span style="font-size:13px;color:#555" id="start-hint"></span>
+  </div>
+</div>
+
+<!-- GAME SCREEN -->
+<div id="screen-game" class="screen">
+  <div class="top-bar">
+    <span class="room-code-badge" id="game-code"></span>
+    <div class="avatars-row" id="game-avatars"></div>
+  </div>
+
+  <div style="margin-bottom:1rem">
+    <div class="row" style="margin-bottom:4px">
+      <input type="text" id="guess-input" placeholder="Type a word and press Enter..." onkeydown="if(event.key==='Enter')submitGuess()">
+      <button class="btn btn-green" onclick="submitGuess()" id="guess-btn">Send</button>
+    </div>
+    <div class="hint-bar">
+      <span class="hint-count" id="hint-count">Hints used: 0</span>
+      <button class="btn btn-hint" onclick="getHint()" id="hint-btn">💡 Get hint</button>
+    </div>
+    <div class="status">
+      <div class="spinner" id="spinner"></div>
+      <span id="guess-status"></span>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('all')" id="tab-all">All guesses</button>
+    <button class="tab" onclick="switchTab('mine')" id="tab-mine">Mine</button>
+    <button class="tab" onclick="switchTab('board')" id="tab-board">Leaderboard</button>
+  </div>
+  <div id="panel-all" class="tab-panel active">
+    <div class="card" style="padding:0.75rem 1rem">
+      <div class="scroll-box" id="all-list"><p class="empty">No guesses yet — be the first!</p></div>
+    </div>
+  </div>
+  <div id="panel-mine" class="tab-panel">
+    <div class="card" style="padding:0.75rem 1rem">
+      <div class="scroll-box" id="mine-list"><p class="empty">Your guesses will appear here.</p></div>
+    </div>
+  </div>
+  <div id="panel-board" class="tab-panel">
+    <div class="card">
+      <div id="board-list"><p class="empty">Scores update as you guess.</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- WIN SCREEN -->
+<div id="screen-win" class="screen">
+  <div class="winner-box">
+    <div style="font-size:32px;margin-bottom:8px">🎉</div>
+    <h2 id="win-title"></h2>
+    <p id="win-sub"></p>
+  </div>
+  <div class="card">
+    <div class="label">Final standings</div>
+    <div id="win-board"></div>
+  </div>
+  <button class="btn btn-green" onclick="playAgain()" id="again-btn" style="margin-top:4px">↺ Play again</button>
+</div>
+
+</div>
+
+<script>
+// ─── COLORS ───────────────────────────────────────────────
+const COLORS = [
+  {bg:'#1e3a5f',text:'#60a5fa'},
+  {bg:'#14532d',text:'#4ade80'},
+  {bg:'#78350f',text:'#fbbf24'},
+  {bg:'#450a0a',text:'#f87171'},
+  {bg:'#2e1065',text:'#a78bfa'},
+  {bg:'#0f3d30',text:'#34d399'},
+  {bg:'#4a044e',text:'#e879f9'},
+  {bg:'#1c3a2a',text:'#6ee7b7'},
+];
+
+// ─── WORD LIST ─────────────────────────────────────────────
+const WORDS = ['apple','bridge','cloud','dance','earth','flame','ghost','heart','island','jungle','lemon','music','night','ocean','plant','river','stone','tower','voice','water','bread','chess','dream','eagle','floor','nurse','opera','piano','radio','steel','table','wheat','youth','arrow','beach','cabin','tiger','pizza','crown','magic','paper','storm','frost','honey','sword','pearl','chair','grape','knife','mouse','sheep','snake','train','truck','whale','witch','clock','drink','field','giant','glass','grass','hotel','light','money','mouth','paint','peace','queen','quest','sauce','scout','sheep','shell','shirt','shoes','sleep','small','smile','smoke','snake','speed','sport','spoon','stair','stake','stamp','stand','stare','start','state','stays','steal','steam','steel','stick','still','stock','stone','stood','store','storm','stove','strap','straw','strip','stuck','study','stuff','sugar','sunny','super','swamp','swear','sweat','sweet','swept','sword','swore','swung'];
+
+// ─── RANK CACHE ────────────────────────────────────────────
+const rankCache = {};
+const GEMINI_KEY = 'AIzaSyDBHtrj1rtFBRjIZ7DPnEQHwxxkjW2O_-k';
+
+// ─── STATE ─────────────────────────────────────────────────
+let db = null;
+let roomRef = null;
+let G = {
+  nick:'', roomCode:'', isHost:false,
+  secretWord:'', guesses:[], players:{}, scores:{},
+  winner:null, myColorIdx:0, hintsUsed:0
+};
+
+// ─── HELPERS ──────────────────────────────────────────────
+function $(id){return document.getElementById(id);}
+function show(name){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  $('screen-'+name).classList.add('active');
+}
+function setLoading(on, msg=''){
+  $('spinner').style.display = on ? 'block' : 'none';
+  $('guess-status').textContent = msg;
+  $('guess-btn').disabled = on;
+  $('guess-input').disabled = on;
+  $('hint-btn').disabled = on;
+}
+
+// ─── FIREBASE INIT ────────────────────────────────────────
+function initFirebase(){
+  const raw = $('fb-config').value.trim();
+  $('config-error').textContent = '';
+
+  let cfg;
+  try {
+    let cleaned = raw;
+    cleaned = cleaned.replace(/^.*?=\s*/,'').replace(/;?\s*$/,'');
+    cfg = JSON.parse(cleaned);
+  } catch(e) {
+    $('config-error').textContent = 'Invalid JSON. Paste only the {...} config object with quoted keys.';
+    return;
+  }
+  if(!cfg.databaseURL){
+    $('config-error').textContent = 'Missing databaseURL. Make sure Realtime Database is enabled in Firebase.';
+    return;
+  }
+
+  try {
+    if(!firebase.apps.length) firebase.initializeApp(cfg);
+    db = firebase.database();
+    db.ref('.info/connected').once('value', snap=>{
+      if(snap.val() === true){
+        checkUrlRoom();
+        show('join');
+      } else {
+        $('config-error').textContent = 'Connected but database unreachable. Check Realtime Database rules (set read/write to true).';
+      }
+    });
+  } catch(e) {
+    $('config-error').textContent = 'Firebase error: ' + e.message;
+  }
+}
+
+function checkUrlRoom(){
+  const params = new URLSearchParams(window.location.search);
+  const r = params.get('room');
+  if(r){
+    $('room-input').value = r.toUpperCase();
+    $('room-input').disabled = true;
+  }
+}
+
+// ─── JOIN ─────────────────────────────────────────────────
+function genCode(){return Math.random().toString(36).slice(2,7).toUpperCase();}
+
+async function handleJoin(){
+  const nick = $('nick-input').value.trim();
+  if(!nick){$('join-error').textContent='Please enter a nickname.';return;}
+  $('join-error').textContent='';
+  G.nick = nick;
+  G.myColorIdx = Math.floor(Math.random()*COLORS.length);
+
+  let code = $('room-input').value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if(!code){
+    code = genCode();
+    G.isHost = true;
+  } else {
+    const snap = await db.ref('rooms/'+code).once('value');
+    if(!snap.exists()){$('join-error').textContent='Room not found. Check the code or leave blank to create.';return;}
+    G.isHost = false;
+  }
+  G.roomCode = code;
+  roomRef = db.ref('rooms/'+code);
+
+  await roomRef.child('players/'+nick).set({nick, colorIdx:G.myColorIdx, joinedAt:Date.now()});
+  await roomRef.child('scores/'+nick).transaction(cur => cur || {guesses:0, best:99999, found:false, hints:0});
+
+  showLobby();
+}
+
+// ─── LOBBY ────────────────────────────────────────────────
+function showLobby(){
+  $('lobby-code').textContent = G.roomCode;
+  const link = window.location.origin + window.location.pathname + '?room=' + G.roomCode;
+  $('lobby-link').textContent = link;
+  if(G.isHost){
+    $('start-hint').textContent = "You're the host — start when ready.";
+  } else {
+    $('start-btn').style.display = 'none';
+    $('start-hint').textContent = 'Waiting for host to start...';
+  }
+  show('lobby');
+
+  roomRef.child('players').on('value', snap=>{
+    G.players = snap.val()||{};
+    renderLobbyPlayers();
+  });
+  roomRef.child('started').on('value', snap=>{
+    if(snap.val() === true){
+      roomRef.child('players').off();
+      roomRef.child('started').off();
+      enterGame();
+    }
+  });
+}
+
+function renderLobbyPlayers(){
+  $('lobby-players').innerHTML = Object.values(G.players).map(p=>{
+    const c = COLORS[p.colorIdx%COLORS.length];
+    return `<div class="chip"><div class="avatar" style="background:${c.bg};color:${c.text}">${p.nick.slice(0,2).toUpperCase()}</div><span>${p.nick}</span></div>`;
+  }).join('');
+}
+
+// ─── START ────────────────────────────────────────────────
+async function startGame(){
+  if(!G.isHost) return;
+  const word = WORDS[Math.floor(Math.random()*WORDS.length)];
+  await roomRef.set({
+    ...((await roomRef.once('value')).val()||{}),
+    secretWord: word,
+    started: true,
+    winner: null,
+    guesses: [],
+  });
+}
+
+// ─── GAME ─────────────────────────────────────────────────
+function enterGame(){
+  roomRef.once('value', snap=>{
+    const room = snap.val()||{};
+    G.secretWord = room.secretWord;
+    G.players = room.players||{};
+    G.scores = room.scores||{};
+    G.winner = room.winner||null;
+    G.hintsUsed = (room.scores?.[G.nick]?.hints)||0;
+    $('game-code').textContent = 'Room: '+G.roomCode;
+    $('hint-count').textContent = 'Hints used: '+G.hintsUsed;
+    show('game');
+    listenGuesses();
+    listenWinner();
+    renderGameAvatars();
+  });
+}
+
+function listenGuesses(){
+  roomRef.child('guesses').on('value', snap=>{
+    const data = snap.val();
+    G.guesses = data ? Object.values(data).sort((a,b)=>b.ts-a.ts) : [];
+    roomRef.child('scores').once('value', s=>{ G.scores=s.val()||{}; renderAll(); });
+  });
+}
+
+function listenWinner(){
+  roomRef.child('winner').on('value', snap=>{
+    if(snap.val() && !G.winner){
+      G.winner = snap.val();
+      roomRef.child('scores').once('value', s=>{
+        G.scores = s.val()||{};
+        roomRef.child('guesses').off();
+        roomRef.child('winner').off();
+        showWin();
+      });
+    }
+  });
+}
+
+// ─── GUESS ────────────────────────────────────────────────
+async function submitGuess(){
+  const inp = $('guess-input');
+  const word = inp.value.trim().toLowerCase().replace(/[^a-z]/g,'');
+  if(!word || G.winner) return;
+  inp.value = '';
+
+  if(word === G.secretWord){
+    setLoading(false);
+    await recordGuess(word, 1, false);
+    await roomRef.child('winner').set(G.nick);
+    return;
+  }
+
+  setLoading(true, 'Ranking "'+word+'"...');
+  const rank = await getRank(word);
+  setLoading(false);
+  await recordGuess(word, rank, false);
+}
+
+// ─── HINT ─────────────────────────────────────────────────
+async function getHint(){
+  if(G.winner) return;
+  setLoading(true, 'Getting hint...');
+
+  // find best current rank among all guesses (mine + others)
+  const myGuesses = G.guesses.filter(g=>g.nick===G.nick && !g.isHint);
+  const bestRank = myGuesses.length ? Math.min(...myGuesses.map(g=>g.rank)) : 999;
+
+  try {
+    const prompt = `You are the hint engine for a Contexto-style word game.
+Secret word: "${G.secretWord}"
+The player's best guess so far has rank ${bestRank} (lower = closer; 1 = the answer).
+Give ONE word hint that is semantically closer to "${G.secretWord}" than rank ${bestRank}.
+The hint should NOT be "${G.secretWord}" itself.
+Reply with ONLY one word, lowercase. Nothing else.`;
+
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        contents:[{parts:[{text:prompt}]}],
+        generationConfig:{maxOutputTokens:10,temperature:0.7} 
+      })
+    });
+    
+    const data = await res.json();
+    const hint = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim().toLowerCase().replace(/[^a-z]/g,'') || '';
+    
+    if(!hint){setLoading(false,'Could not get hint, try again.');return;}
+
+    // rank the hint word too
+    const hintRank = rankCache[hint] || await getRank(hint);
+
+    G.hintsUsed++;
+    $('hint-count').textContent = 'Hints used: '+G.hintsUsed;
+    await roomRef.child('scores/'+G.nick+'/hints').set(G.hintsUsed);
+    await recordGuess(hint, hintRank, true);
+    setLoading(false);
+  } catch(e){
+    setLoading(false, 'Hint failed. Try again.');
+  }
+}
+
+// ─── RANK (with cache) ────────────────────────────────────
+async function getRank(guess){
+  if(rankCache[guess]) return rankCache[guess];
+  try{
+    const prompt = `Contexto word ranking. Secret word: "${G.secretWord}". Player guessed: "${guess}".
+Rate semantic similarity as an integer:
+1=exact match, 2-50=very close, 51-300=related, 301-1500=somewhat related, 1501-5000=not related.
+Reply with ONE integer only. Nothing else.`;
+
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:10,temperature:0}})
+    });
+    const data = await res.json();
+    const txt = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    const n = parseInt(txt);
+    const rank = isNaN(n) ? Math.floor(Math.random()*2000+100) : Math.max(2,n);
+    rankCache[guess] = rank;
+    return rank;
+  }catch(e){
+    return Math.floor(Math.random()*2000+100);
+  }
+}
+
+// ─── RECORD GUESS ─────────────────────────────────────────
+async function recordGuess(word, rank, isHint){
+  const entry = {word, rank, nick:G.nick, colorIdx:G.myColorIdx, ts:Date.now(), isHint:isHint||false};
+  const newRef = roomRef.child('guesses').push();
+  await newRef.set(entry);
+  await roomRef.child('scores/'+G.nick).transaction(cur=>{
+    cur = cur||{guesses:0,best:99999,found:false,hints:0};
+    if(!isHint) cur.guesses++;
+    if(rank < cur.best) cur.best = rank;
+    if(rank===1) cur.found=true;
+    return cur;
+  });
+}
+
+// ─── RENDER ───────────────────────────────────────────────
+function rankClass(r,isHint){
+  if(isHint) return 'rank-hint';
+  if(r===1) return 'rank-gold';
+  if(r<=300) return 'rank-green';
+  if(r<=1500) return 'rank-amber';
+  return 'rank-red';
+}
+
+function guessRowHTML(g){
+  const c = COLORS[(g.colorIdx||0)%COLORS.length];
+  const hintLabel = g.isHint ? ' 💡' : '';
+  return `<div class="guess-row">
+    <span class="rank ${rankClass(g.rank,g.isHint)}">${g.rank===1?'🎯':g.rank}</span>
+    <span class="word${g.isHint?' hint-word':''}">${g.word}${hintLabel}</span>
+    <span class="nick-tag" style="background:${c.bg};color:${c.text};border-color:${c.text}44">${g.nick}</span>
+  </div>`;
+}
+
+function renderAll(){
+  const all = $('all-list');
+  const mine = $('mine-list');
+  if(!G.guesses.length){
+    all.innerHTML='<p class="empty">No guesses yet — be the first!</p>';
+    mine.innerHTML='<p class="empty">Your guesses will appear here.</p>';
+  } else {
+    all.innerHTML = G.guesses.map(guessRowHTML).join('');
+    const myG = G.guesses.filter(g=>g.nick===G.nick);
+    mine.innerHTML = myG.length ? myG.map(guessRowHTML).join('') : '<p class="empty">Your guesses will appear here.</p>';
+  }
+  renderBoard();
+}
+
+function renderBoard(){
+  const el = $('board-list');
+  const entries = Object.entries(G.scores||{}).sort((a,b)=>{
+    if(a[1].found&&!b[1].found) return -1;
+    if(!a[1].found&&b[1].found) return 1;
+    return (a[1].best||99999)-(b[1].best||99999);
+  });
+  if(!entries.length){el.innerHTML='<p class="empty">Scores update as you guess.</p>';return;}
+  el.innerHTML = entries.map(([nick,s],i)=>`
+    <div class="lb-row">
+      <span style="font-size:${i===0?18:15}px;min-width:28px">${i===0?'🥇':i===1?'🥈':i===2?'🥉':(i+1)+'.'}
+      </span>
+      <span style="flex:1;font-size:14px;font-weight:${nick===G.nick?600:400}">${nick}${nick===G.nick?' (you)':''}</span>
+      ${s.found?'<span class="badge">Found it!</span>':''}
+      ${s.hints?`<span class="badge badge-hint">💡×${s.hints}</span>`:''}
+      <span style="font-size:12px;color:#666">${s.guesses||0} guess${s.guesses!==1?'es':''} · best: ${!s.best||s.best===99999?'—':s.best}</span>
+    </div>`).join('');
+}
+
+function renderGameAvatars(){
+  $('game-avatars').innerHTML = Object.values(G.players||{}).slice(0,6).map(p=>{
+    const c = COLORS[(p.colorIdx||0)%COLORS.length];
+    return `<div class="avatar" style="background:${c.bg};color:${c.text};width:30px;height:30px;font-size:11px;border:2px solid #0f0f0f" title="${p.nick}">${p.nick.slice(0,2).toUpperCase()}</div>`;
+  }).join('');
+}
+
+function switchTab(t){
+  ['all','mine','board'].forEach(id=>{
+    $('tab-'+id).classList.toggle('active', id===t);
+  });
+  $('panel-all').classList.toggle('active', t==='all');
+  $('panel-mine').classList.toggle('active', t==='mine');
+  $('panel-board').classList.toggle('active', t==='board');
+}
+
+// ─── WIN ──────────────────────────────────────────────────
+function showWin(){
+  $('win-title').textContent = G.winner===G.nick ? 'You found it! 🎉' : G.winner+' found the word!';
+  $('win-sub').textContent = 'The secret word was: "'+G.secretWord+'"';
+  const entries = Object.entries(G.scores||{}).sort((a,b)=>{
+    if(a[1].found&&!b[1].found) return -1;
+    if(!a[1].found&&b[1].found) return 1;
+    return (a[1].best||99999)-(b[1].best||99999);
+  });
+  $('win-board').innerHTML = entries.map(([nick,s],i)=>`
+    <div class="lb-row">
+      <span style="font-size:${i===0?20:16}px;min-width:28px">${i===0?'🥇':i===1?'🥈':i===2?'🥉':(i+1)+'.'}
+      </span>
+      <span style="flex:1;font-size:14px;font-weight:500">${nick}</span>
+      ${s.found?'<span class="badge">Found it!</span>':''}
+      ${s.hints?`<span class="badge badge-hint">💡×${s.hints}</span>`:''}
+      <span style="font-size:12px;color:#666">${s.guesses||0} guesses · best: ${!s.best||s.best===99999?'—':s.best}</span>
+    </div>`).join('');
+  if(!G.isHost) $('again-btn').style.display='none';
+  show('win');
+}
+
+async function playAgain(){
+  if(!G.isHost){alert('Only the host can start a new game!');return;}
+  G.winner=null; G.guesses=[]; G.hintsUsed=0; G.secretWord='';
+  rankCache;
+  await startGame();
+}
+
+function copyLink(){
+  const link = window.location.origin + window.location.pathname + '?room=' + G.roomCode;
+  navigator.clipboard.writeText(link).then(()=>{
+    const b = event.target.closest('button');
+    const o=b.textContent; b.textContent='✓ Copied!';
+    setTimeout(()=>b.textContent=o,2000);
+  });
+}
+</script>
+</body>
+</html>
