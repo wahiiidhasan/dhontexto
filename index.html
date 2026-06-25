@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Contexto Multiplayer</title>
 
-<!-- Firebase -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 
@@ -85,7 +84,6 @@ input:disabled{opacity:0.5;cursor:not-allowed}
 <body>
 <div class="container">
 
-<!-- FIREBASE CONFIG SCREEN -->
 <div id="screen-config" class="screen active">
   <h1>Contexto <span>Multiplayer</span></h1>
   <p class="sub">Paste your Firebase config to get started.</p>
@@ -112,7 +110,6 @@ input:disabled{opacity:0.5;cursor:not-allowed}
   <p style="font-size:12px;color:#444;margin-top:10px">AI ranking and hints powered by Gemini. Firebase config is only stored in this session.</p>
 </div>
 
-<!-- JOIN SCREEN -->
 <div id="screen-join" class="screen">
   <h1>Contexto <span>Multiplayer</span></h1>
   <p class="sub">Guess the secret word. Compete with friends in real time.</p>
@@ -128,7 +125,6 @@ input:disabled{opacity:0.5;cursor:not-allowed}
   </div>
 </div>
 
-<!-- LOBBY SCREEN -->
 <div id="screen-lobby" class="screen">
   <h1>Room <span id="lobby-code" style="font-family:monospace"></span></h1>
   <p class="sub">Share this link with friends:</p>
@@ -146,7 +142,6 @@ input:disabled{opacity:0.5;cursor:not-allowed}
   </div>
 </div>
 
-<!-- GAME SCREEN -->
 <div id="screen-game" class="screen">
   <div class="top-bar">
     <span class="room-code-badge" id="game-code"></span>
@@ -190,7 +185,6 @@ input:disabled{opacity:0.5;cursor:not-allowed}
   </div>
 </div>
 
-<!-- WIN SCREEN -->
 <div id="screen-win" class="screen">
   <div class="winner-box">
     <div style="font-size:32px;margin-bottom:8px">🎉</div>
@@ -437,26 +431,23 @@ async function getHint(){
   const bestRank = myGuesses.length ? Math.min(...myGuesses.map(g=>g.rank)) : 999;
 
   try {
-    const prompt = `You are the hint engine for a Contexto-style word game.
-Secret word: "${G.secretWord}"
-The player's best guess so far has rank ${bestRank} (lower = closer; 1 = the answer).
-Give ONE word hint that is semantically closer to "${G.secretWord}" than rank ${bestRank}.
-The hint should NOT be "${G.secretWord}" itself.
-Reply with ONLY one word, lowercase. Nothing else.`;
-
+    const prompt = `Secret word: "${G.secretWord}". Player's best guess rank: ${bestRank}. Provide ONE related word as a hint that is closer in meaning than the current best guess, but NOT the secret word itself. Return ONLY a valid JSON object in this exact format: {"hint": "word"}`;
+    
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
         contents:[{parts:[{text:prompt}]}],
-        generationConfig:{maxOutputTokens:10,temperature:0.7} 
+        generationConfig:{responseMimeType:"application/json", maxOutputTokens:20, temperature:0.7}
       })
     });
     
     const data = await res.json();
-    const hint = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim().toLowerCase().replace(/[^a-z]/g,'') || '';
+    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+    const parsed = JSON.parse(rawText);
+    const hint = parsed.hint?.trim().toLowerCase().replace(/[^a-z]/g,'');
     
-    if(!hint){setLoading(false,'Could not get hint, try again.');return;}
+    if(!hint){setLoading(false,'Hint failed (AI format error). Try again.');return;}
 
     // rank the hint word too
     const hintRank = rankCache[hint] || await getRank(hint);
@@ -467,7 +458,8 @@ Reply with ONLY one word, lowercase. Nothing else.`;
     await recordGuess(hint, hintRank, true);
     setLoading(false);
   } catch(e){
-    setLoading(false, 'Hint failed. Try again.');
+    console.error("Hint Error:", e);
+    setLoading(false, 'Hint failed (Check console). Try again.');
   }
 }
 
@@ -475,24 +467,37 @@ Reply with ONLY one word, lowercase. Nothing else.`;
 async function getRank(guess){
   if(rankCache[guess]) return rankCache[guess];
   try{
-    const prompt = `Contexto word ranking. Secret word: "${G.secretWord}". Player guessed: "${guess}".
-Rate semantic similarity as an integer:
-1=exact match, 2-50=very close, 51-300=related, 301-1500=somewhat related, 1501-5000=not related.
-Reply with ONE integer only. Nothing else.`;
+    const prompt = `Secret word: "${G.secretWord}". Player guessed: "${guess}".
+Estimate the semantic similarity rank out of 100,000 English words.
+1 = Exact match
+2-100 = Synonyms or highly similar
+101-1000 = Very related
+1001-5000 = Somewhat related
+5001-20000 = Tangentially related
+20001-100000 = Completely unrelated.
+Return ONLY a valid JSON object in this exact format: {"rank": integer}`;
 
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:10,temperature:0}})
+      body:JSON.stringify({
+        contents:[{parts:[{text:prompt}]}],
+        generationConfig:{responseMimeType:"application/json", maxOutputTokens:15, temperature:0}
+      })
     });
+    
     const data = await res.json();
-    const txt = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-    const n = parseInt(txt);
-    const rank = isNaN(n) ? Math.floor(Math.random()*2000+100) : Math.max(2,n);
+    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+    const parsed = JSON.parse(rawText);
+    const n = parseInt(parsed.rank);
+    
+    // Fallback to a random bad rank if the AI hallucinates a non-number
+    const rank = isNaN(n) ? Math.floor(Math.random()*50000+5000) : Math.max(2, n);
     rankCache[guess] = rank;
     return rank;
   }catch(e){
-    return Math.floor(Math.random()*2000+100);
+    console.error("Rank Error:", e);
+    return Math.floor(Math.random()*50000+5000);
   }
 }
 
