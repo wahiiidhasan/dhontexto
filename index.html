@@ -84,6 +84,7 @@ input:disabled{opacity:0.5;cursor:not-allowed}
 <body>
 <div class="container">
 
+<!-- FIREBASE CONFIG SCREEN -->
 <div id="screen-config" class="screen active">
   <h1>Contexto <span>Multiplayer</span></h1>
   <p class="sub">Paste your Firebase config to get started.</p>
@@ -107,9 +108,10 @@ input:disabled{opacity:0.5;cursor:not-allowed}
 
   <p class="error" id="config-error"></p>
   <button class="btn btn-green" onclick="initFirebase()">Connect & Play →</button>
-  <p style="font-size:12px;color:#444;margin-top:10px">AI ranking and hints powered by Gemini. Firebase config is only stored in this session.</p>
+  <p style="font-size:12px;color:#444;margin-top:10px">Semantic ranking mapped by Datamuse API. Firebase config is only stored in this session.</p>
 </div>
 
+<!-- JOIN SCREEN -->
 <div id="screen-join" class="screen">
   <h1>Contexto <span>Multiplayer</span></h1>
   <p class="sub">Guess the secret word. Compete with friends in real time.</p>
@@ -125,6 +127,7 @@ input:disabled{opacity:0.5;cursor:not-allowed}
   </div>
 </div>
 
+<!-- LOBBY SCREEN -->
 <div id="screen-lobby" class="screen">
   <h1>Room <span id="lobby-code" style="font-family:monospace"></span></h1>
   <p class="sub">Share this link with friends:</p>
@@ -142,6 +145,7 @@ input:disabled{opacity:0.5;cursor:not-allowed}
   </div>
 </div>
 
+<!-- GAME SCREEN -->
 <div id="screen-game" class="screen">
   <div class="top-bar">
     <span class="room-code-badge" id="game-code"></span>
@@ -185,6 +189,7 @@ input:disabled{opacity:0.5;cursor:not-allowed}
   </div>
 </div>
 
+<!-- WIN SCREEN -->
 <div id="screen-win" class="screen">
   <div class="winner-box">
     <div style="font-size:32px;margin-bottom:8px">🎉</div>
@@ -196,6 +201,7 @@ input:disabled{opacity:0.5;cursor:not-allowed}
     <div id="win-board"></div>
   </div>
   
+  <!-- MATCH HISTORY SECTION -->
   <div class="card" style="margin-top:1rem">
     <div class="label">Match History (All Guesses)</div>
     <div class="scroll-box" id="win-history" style="max-height: 250px;"></div>
@@ -222,13 +228,10 @@ const COLORS = [
 // ─── WORD LIST ─────────────────────────────────────────────
 const WORDS = ['apple','bridge','cloud','dance','earth','flame','ghost','heart','island','jungle','lemon','music','night','ocean','plant','river','stone','tower','voice','water','bread','chess','dream','eagle','floor','nurse','opera','piano','radio','steel','table','wheat','youth','arrow','beach','cabin','tiger','pizza','crown','magic','paper','storm','frost','honey','sword','pearl','chair','grape','knife','mouse','sheep','snake','train','truck','whale','witch','clock','drink','field','giant','glass','grass','hotel','light','money','mouth','paint','peace','queen','quest','sauce','scout','sheep','shell','shirt','shoes','sleep','small','smile','smoke','snake','speed','sport','spoon','stair','stake','stamp','stand','stare','start','state','stays','steal','steam','steel','stick','still','stock','stone','stood','store','storm','stove','strap','straw','strip','stuck','study','stuff','sugar','sunny','super','swamp','swear','sweat','sweet','swept','sword','swore','swung'];
 
-// ─── RANK CACHE ────────────────────────────────────────────
-const rankCache = {};
-const GEMINI_KEY = 'AIzaSyDBHtrj1rtFBRjIZ7DPnEQHwxxkjW2O_-k';
-
 // ─── STATE ─────────────────────────────────────────────────
 let db = null;
 let roomRef = null;
+let semanticDictionary = {}; // Stores Datamuse API results
 let G = {
   nick:'', roomCode:'', isHost:false,
   secretWord:'', guesses:[], players:{}, scores:{},
@@ -249,14 +252,37 @@ function setLoading(on, msg=''){
   $('hint-btn').disabled = on;
 }
 
-// Safely parse AI JSON to prevent markdown block crashes
-function parseAIJson(rawText) {
+// ─── DATAMUSE ENGINE (REPLACES LLM API) ────────────────────
+async function loadSemanticDictionary(secretWord) {
   try {
-    const clean = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
-    return JSON.parse(clean);
-  } catch(e) {
-    return null;
+    // Fetches top 1000 mathematically related words
+    const res = await fetch(`https://api.datamuse.com/words?ml=${secretWord}&max=1000`);
+    const data = await res.json();
+    
+    semanticDictionary = {};
+    let rankCounter = 2; // Secret word is rank 1
+    
+    data.forEach(item => {
+      const w = item.word.toLowerCase();
+      // Only cache valid single words
+      if (w !== secretWord && !semanticDictionary[w] && !w.includes(' ')) {
+        semanticDictionary[w] = rankCounter++;
+      }
+    });
+  } catch (e) {
+    console.error("Failed to load semantic dictionary", e);
   }
+}
+
+// Gives a consistent "bad" score to words outside the top 1000
+function getDeterministicHashRank(word, secretWord) {
+  let hash = 0;
+  const str = word + secretWord; 
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash) % 89000 + 1001; // Maps far words to a rank between 1001 and 90,000
 }
 
 // ─── FIREBASE INIT ────────────────────────────────────────
@@ -390,7 +416,7 @@ async function startGame(){
 
 // ─── GAME ─────────────────────────────────────────────────
 function enterGame(){
-  roomRef.once('value', snap=>{
+  roomRef.once('value', async snap=>{
     const room = snap.val()||{};
     G.secretWord = room.secretWord;
     G.players = room.players||{};
@@ -399,6 +425,12 @@ function enterGame(){
     G.hintsUsed = (room.scores?.[G.nick]?.hints)||0;
     $('game-code').textContent = 'Room: '+G.roomCode;
     $('hint-count').textContent = 'Hints used: '+G.hintsUsed;
+    
+    // Load the mathematical word distances before showing screen
+    setLoading(true, "Downloading semantic dataset...");
+    await loadSemanticDictionary(G.secretWord);
+    setLoading(false);
+    
     show('game');
     listenGuesses();
     listenWinner();
@@ -436,98 +468,55 @@ async function submitGuess(){
   inp.value = '';
 
   if(word === G.secretWord){
-    setLoading(false);
     await recordGuess(word, 1, false);
     await roomRef.child('winner').set(G.nick);
     return;
   }
 
-  setLoading(true, 'Ranking "'+word+'"...');
-  const rank = await getRank(word);
-  setLoading(false);
+  // Get rank from the pre-loaded semantic dictionary or fallback hash
+  const rank = semanticDictionary[word] || getDeterministicHashRank(word, G.secretWord);
   await recordGuess(word, rank, false);
 }
 
 // ─── HINT ─────────────────────────────────────────────────
 async function getHint(){
   if(G.winner) return;
-  setLoading(true, 'Getting hint...');
+  setLoading(true, 'Calculating hint...');
 
   const myGuesses = G.guesses.filter(g=>g.nick===G.nick && !g.isHint);
-  const bestRank = myGuesses.length ? Math.min(...myGuesses.map(g=>g.rank)) : 99999;
+  const bestRank = myGuesses.length ? Math.min(...myGuesses.map(g=>g.rank)) : 1001;
 
-  try {
-    const prompt = `Act as the hint engine for a Contexto game.
-Secret word: "${G.secretWord}"
-Player's closest guess rank: ${bestRank}
-Provide ONE related English word as a hint. It must be semantically closer to the secret word than the player's best guess (meaning its rank should be a lower number than ${bestRank}), but it MUST NOT be the secret word itself.
-Return ONLY valid JSON in this exact format: {"hint": "word"}`;
-    
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        contents:[{parts:[{text:prompt}]}],
-        generationConfig:{responseMimeType:"application/json", maxOutputTokens:20, temperature:0.7}
-      })
-    });
-    
-    const data = await res.json();
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-    const parsed = parseAIJson(rawText) || {};
-    const hint = parsed.hint?.trim().toLowerCase().replace(/[^a-z]/g,'');
-    
-    if(!hint){setLoading(false,'Hint failed (AI format error). Try again.');return;}
+  // Find a smart word halfway between the best guess and the answer
+  const dictEntries = Object.entries(semanticDictionary);
+  const targetRank = bestRank > 1000 ? 500 : Math.max(2, Math.floor(bestRank / 2));
+  
+  let hintWord = null;
+  let hintRank = 0;
 
-    const hintRank = rankCache[hint] || await getRank(hint);
-
-    G.hintsUsed++;
-    $('hint-count').textContent = 'Hints used: '+G.hintsUsed;
-    await roomRef.child('scores/'+G.nick+'/hints').set(G.hintsUsed);
-    await recordGuess(hint, hintRank, true);
-    setLoading(false);
-  } catch(e){
-    console.error("Hint Error:", e);
-    setLoading(false, 'Hint failed (Check console). Try again.');
+  for(let [w, r] of dictEntries) {
+    if (r <= targetRank && !G.guesses.find(g => g.word === w)) {
+      hintWord = w;
+      hintRank = r;
+      // Loop naturally overwrites until it reaches the closest match to targetRank
+    }
   }
-}
 
-// ─── RANK (with cache) ────────────────────────────────────
-async function getRank(guess){
-  if(rankCache[guess]) return rankCache[guess];
-  try{
-    const prompt = `Act as the semantic ranking engine for a Contexto game.
-Secret word: "${G.secretWord}"
-Player guessed: "${guess}"
-Rank the similarity of the guess to the secret word on a scale of 1 to 100,000.
-1 = Exact match (the word itself).
-2-50 = Extremely close (plurals, exact synonyms).
-51-500 = Highly related (e.g., arrow to archery, bow, target).
-501-2000 = Related category or function.
-2001-100000 = Unrelated.
-Return ONLY valid JSON in this exact format: {"rank": integer}`;
-
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        contents:[{parts:[{text:prompt}]}],
-        generationConfig:{responseMimeType:"application/json", maxOutputTokens:15, temperature:0.2}
-      })
-    });
-    
-    const data = await res.json();
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-    const parsed = parseAIJson(rawText) || {};
-    const n = parseInt(parsed.rank);
-    
-    const rank = isNaN(n) ? Math.floor(Math.random()*50000+5000) : Math.max(2, n);
-    rankCache[guess] = rank;
-    return rank;
-  }catch(e){
-    console.error("Rank Error:", e);
-    return Math.floor(Math.random()*50000+5000);
+  // Fallback if loop missed
+  if (!hintWord && dictEntries.length > 0) {
+    hintWord = dictEntries[0][0];
+    hintRank = dictEntries[0][1];
   }
+
+  if(!hintWord){
+    setLoading(false, 'Hint failed (No words available).');
+    return;
+  }
+
+  G.hintsUsed++;
+  $('hint-count').textContent = 'Hints used: '+G.hintsUsed;
+  await roomRef.child('scores/'+G.nick+'/hints').set(G.hintsUsed);
+  await recordGuess(hintWord, hintRank, true);
+  setLoading(false);
 }
 
 // ─── RECORD GUESS ─────────────────────────────────────────
@@ -633,14 +622,14 @@ function showWin(){
       <span style="font-size:12px;color:#666">${s.guesses||0} guesses · best: ${!s.best||s.best===99999?'—':s.best}</span>
     </div>`).join('');
     
-  // Populate the new Match History section
+  // Populate Match History
   $('win-history').innerHTML = G.guesses.map(guessRowHTML).join('');
   
   show('win');
 }
 
 function playAgain(){
-  // Force a hard redirect back to the origin domain (lobby) to wipe all Firebase session data
+  // Force hard redirect to origin to completely wipe state and return to lobby
   window.location.href = window.location.origin + window.location.pathname;
 }
 
