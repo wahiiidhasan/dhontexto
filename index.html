@@ -265,14 +265,28 @@ function initFirebase(){
   try {
     if(!firebase.apps.length) firebase.initializeApp(cfg);
     db = firebase.database();
-    db.ref('.info/connected').once('value', snap=>{
+    
+    // Show a temporary loading message
+    $('config-error').style.color = '#4ade80'; 
+    $('config-error').textContent = 'Connecting...';
+
+    // Listen continuously for the connection to establish
+    db.ref('.info/connected').on('value', snap => {
       if(snap.val() === true){
+        $('config-error').textContent = ''; 
         checkUrlRoom();
         show('join');
-      } else {
-        $('config-error').textContent = 'Connected but database unreachable. Check Realtime Database rules (set read/write to true).';
       }
     });
+
+    // If 3 seconds pass and we are still on the config screen, show the error
+    setTimeout(() => {
+      if ($('screen-config').classList.contains('active')) {
+        $('config-error').style.color = '#f87171'; // Back to red
+        $('config-error').textContent = 'Connection taking too long. Check Realtime Database rules (set read/write to true).';
+      }
+    }, 3000);
+
   } catch(e) {
     $('config-error').textContent = 'Firebase error: ' + e.message;
   }
