@@ -195,7 +195,13 @@ input:disabled{opacity:0.5;cursor:not-allowed}
     <div class="label">Final standings</div>
     <div id="win-board"></div>
   </div>
-  <button class="btn btn-green" onclick="playAgain()" id="again-btn" style="margin-top:4px">↺ Play again</button>
+  
+  <div class="card" style="margin-top:1rem">
+    <div class="label">Match History (All Guesses)</div>
+    <div class="scroll-box" id="win-history" style="max-height: 250px;"></div>
+  </div>
+  
+  <button class="btn btn-green" onclick="playAgain()" id="again-btn" style="margin-top:4px">↺ Return to Lobby</button>
 </div>
 
 </div>
@@ -243,6 +249,16 @@ function setLoading(on, msg=''){
   $('hint-btn').disabled = on;
 }
 
+// Safely parse AI JSON to prevent markdown block crashes
+function parseAIJson(rawText) {
+  try {
+    const clean = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+    return JSON.parse(clean);
+  } catch(e) {
+    return null;
+  }
+}
+
 // ─── FIREBASE INIT ────────────────────────────────────────
 function initFirebase(){
   const raw = $('fb-config').value.trim();
@@ -266,11 +282,9 @@ function initFirebase(){
     if(!firebase.apps.length) firebase.initializeApp(cfg);
     db = firebase.database();
     
-    // Show a temporary loading message
     $('config-error').style.color = '#4ade80'; 
     $('config-error').textContent = 'Connecting...';
 
-    // Listen continuously for the connection to establish
     db.ref('.info/connected').on('value', snap => {
       if(snap.val() === true){
         $('config-error').textContent = ''; 
@@ -279,10 +293,9 @@ function initFirebase(){
       }
     });
 
-    // If 3 seconds pass and we are still on the config screen, show the error
     setTimeout(() => {
       if ($('screen-config').classList.contains('active')) {
-        $('config-error').style.color = '#f87171'; // Back to red
+        $('config-error').style.color = '#f87171'; 
         $('config-error').textContent = 'Connection taking too long. Check Realtime Database rules (set read/write to true).';
       }
     }, 3000);
@@ -440,12 +453,15 @@ async function getHint(){
   if(G.winner) return;
   setLoading(true, 'Getting hint...');
 
-  // find best current rank among all guesses (mine + others)
   const myGuesses = G.guesses.filter(g=>g.nick===G.nick && !g.isHint);
-  const bestRank = myGuesses.length ? Math.min(...myGuesses.map(g=>g.rank)) : 999;
+  const bestRank = myGuesses.length ? Math.min(...myGuesses.map(g=>g.rank)) : 99999;
 
   try {
-    const prompt = `Secret word: "${G.secretWord}". Player's best guess rank: ${bestRank}. Provide ONE related word as a hint that is closer in meaning than the current best guess, but NOT the secret word itself. Return ONLY a valid JSON object in this exact format: {"hint": "word"}`;
+    const prompt = `Act as the hint engine for a Contexto game.
+Secret word: "${G.secretWord}"
+Player's closest guess rank: ${bestRank}
+Provide ONE related English word as a hint. It must be semantically closer to the secret word than the player's best guess (meaning its rank should be a lower number than ${bestRank}), but it MUST NOT be the secret word itself.
+Return ONLY valid JSON in this exact format: {"hint": "word"}`;
     
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,{
       method:'POST',
@@ -458,12 +474,11 @@ async function getHint(){
     
     const data = await res.json();
     const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-    const parsed = JSON.parse(rawText);
+    const parsed = parseAIJson(rawText) || {};
     const hint = parsed.hint?.trim().toLowerCase().replace(/[^a-z]/g,'');
     
     if(!hint){setLoading(false,'Hint failed (AI format error). Try again.');return;}
 
-    // rank the hint word too
     const hintRank = rankCache[hint] || await getRank(hint);
 
     G.hintsUsed++;
@@ -481,31 +496,31 @@ async function getHint(){
 async function getRank(guess){
   if(rankCache[guess]) return rankCache[guess];
   try{
-    const prompt = `Secret word: "${G.secretWord}". Player guessed: "${guess}".
-Estimate the semantic similarity rank out of 100,000 English words.
-1 = Exact match
-2-100 = Synonyms or highly similar
-101-1000 = Very related
-1001-5000 = Somewhat related
-5001-20000 = Tangentially related
-20001-100000 = Completely unrelated.
-Return ONLY a valid JSON object in this exact format: {"rank": integer}`;
+    const prompt = `Act as the semantic ranking engine for a Contexto game.
+Secret word: "${G.secretWord}"
+Player guessed: "${guess}"
+Rank the similarity of the guess to the secret word on a scale of 1 to 100,000.
+1 = Exact match (the word itself).
+2-50 = Extremely close (plurals, exact synonyms).
+51-500 = Highly related (e.g., arrow to archery, bow, target).
+501-2000 = Related category or function.
+2001-100000 = Unrelated.
+Return ONLY valid JSON in this exact format: {"rank": integer}`;
 
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
         contents:[{parts:[{text:prompt}]}],
-        generationConfig:{responseMimeType:"application/json", maxOutputTokens:15, temperature:0}
+        generationConfig:{responseMimeType:"application/json", maxOutputTokens:15, temperature:0.2}
       })
     });
     
     const data = await res.json();
     const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-    const parsed = JSON.parse(rawText);
+    const parsed = parseAIJson(rawText) || {};
     const n = parseInt(parsed.rank);
     
-    // Fallback to a random bad rank if the AI hallucinates a non-number
     const rank = isNaN(n) ? Math.floor(Math.random()*50000+5000) : Math.max(2, n);
     rankCache[guess] = rank;
     return rank;
@@ -601,11 +616,13 @@ function switchTab(t){
 function showWin(){
   $('win-title').textContent = G.winner===G.nick ? 'You found it! 🎉' : G.winner+' found the word!';
   $('win-sub').textContent = 'The secret word was: "'+G.secretWord+'"';
+  
   const entries = Object.entries(G.scores||{}).sort((a,b)=>{
     if(a[1].found&&!b[1].found) return -1;
     if(!a[1].found&&b[1].found) return 1;
     return (a[1].best||99999)-(b[1].best||99999);
   });
+  
   $('win-board').innerHTML = entries.map(([nick,s],i)=>`
     <div class="lb-row">
       <span style="font-size:${i===0?20:16}px;min-width:28px">${i===0?'🥇':i===1?'🥈':i===2?'🥉':(i+1)+'.'}
@@ -615,15 +632,16 @@ function showWin(){
       ${s.hints?`<span class="badge badge-hint">💡×${s.hints}</span>`:''}
       <span style="font-size:12px;color:#666">${s.guesses||0} guesses · best: ${!s.best||s.best===99999?'—':s.best}</span>
     </div>`).join('');
-  if(!G.isHost) $('again-btn').style.display='none';
+    
+  // Populate the new Match History section
+  $('win-history').innerHTML = G.guesses.map(guessRowHTML).join('');
+  
   show('win');
 }
 
-async function playAgain(){
-  if(!G.isHost){alert('Only the host can start a new game!');return;}
-  G.winner=null; G.guesses=[]; G.hintsUsed=0; G.secretWord='';
-  rankCache;
-  await startGame();
+function playAgain(){
+  // Force a hard redirect back to the origin domain (lobby) to wipe all Firebase session data
+  window.location.href = window.location.origin + window.location.pathname;
 }
 
 function copyLink(){
